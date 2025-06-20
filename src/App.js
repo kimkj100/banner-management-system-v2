@@ -1,531 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import { database } from './firebase';
-import { ref, set, onValue, off } from 'firebase/database';
-
-export default function App() {
-  const [adminLoggedIn, setAdminLoggedIn] = useState(false);
-  const [companyLoggedIn, setCompanyLoggedIn] = useState(false);
-  const [userId, setUserId] = useState('');
-  const [password, setPassword] = useState('');
-  const [notification, setNotification] = useState('');
-  const [showForm, setShowForm] = useState(false);
-  const [viewMode, setViewMode] = useState('dashboard');
-  const [projects, setProjects] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  // Firebase에서 실시간 데이터 읽기
-  useEffect(() => {
-    const projectsRef = ref(database, 'projects');
-    
-    const unsubscribe = onValue(projectsRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        // Firebase 객체를 배열로 변환
-        const projectsArray = Object.keys(data).map(key => ({
-          firebaseKey: key,
-          ...data[key]
-        }));
-        setProjects(projectsArray);
-      } else {
-        setProjects([]);
-      }
-      setLoading(false);
-    });
-
-    // 컴포넌트 언마운트 시 리스너 제거
-    return () => off(projectsRef, 'value', unsubscribe);
-  }, []);
-
-  // Firebase에 데이터 저장
-  const saveToFirebase = async (updatedProjects) => {
-    try {
-      // 배열을 객체로 변환 (Firebase는 배열보다 객체를 선호)
-      const projectsObject = {};
-      updatedProjects.forEach(project => {
-        const key = project.firebaseKey || project.id;
-        projectsObject[key] = {
-          ...project,
-          firebaseKey: undefined // firebaseKey는 저장하지 않음
-        };
-      });
-      
-      await set(ref(database, 'projects'), projectsObject);
-      showMessage('🔥 Firebase에 실시간 저장 완료!');
-    } catch (error) {
-      console.error('Firebase 저장 실패:', error);
-      showMessage('❌ 저장 실패: ' + error.message);
-    }
-  };
-
-  // 알림 표시
-  const showMessage = (msg) => {
-    setNotification(msg);
-    setTimeout(() => setNotification(''), 3000);
-  };
-
-  // 로그인
-  const doLogin = () => {
-    if (userId === 'admin' && password === 'admin123') {
-      setAdminLoggedIn(true);
-      showMessage('관리자 로그인 성공!');
-    } else if (userId === 'company' && password === 'company123') {
-      setCompanyLoggedIn(true);
-      showMessage('업체 로그인 성공!');
-    } else {
-      showMessage('로그인 실패!');
-    }
-    setUserId('');
-    setPassword('');
-  };
-
-  // 로그아웃
-  const doLogout = () => {
-    setAdminLoggedIn(false);
-    setCompanyLoggedIn(false);
-    setShowForm(false);
-    setViewMode('dashboard');
-    resetForm();
-  };
-
-  // 폼 상태
-  const [newForm, setNewForm] = useState({
-    employeeName: '',
-    department: '',
-    phoneNumber: '',
-    text: '',
-    size: '',
-    deadline: '',
-    location: '',
-    notes: '',
-    referenceImages: []
-  });
-
-  // 폼 업데이트
-  const updateForm = (field, value) => {
-    setNewForm(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
-
-  // 폼 리셋
-  const resetForm = () => {
-    setNewForm({
-      employeeName: '',
-      department: '',
-      phoneNumber: '',
-      text: '',
-      size: '',
-      deadline: '',
-      location: '',
-      notes: '',
-      referenceImages: []
-    });
-  };
-
-  // 참고시안 업로드
-  const handleReferenceUpload = (e) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const newImage = {
-            id: Date.now() + i,
-            name: file.name,
-            preview: event.target.result,
-            file: file
-          };
-          setNewForm(prev => ({
-            ...prev,
-            referenceImages: [...prev.referenceImages, newImage]
-          }));
-        };
-        reader.readAsDataURL(file);
-      }
-    }
-    e.target.value = '';
-  };
-
-  // 참고시안 삭제
-  const removeReferenceImage = (imageId) => {
-    setNewForm(prev => ({
-      ...prev,
-      referenceImages: prev.referenceImages.filter(img => img.id !== imageId)
-    }));
-  };
-
-  // 신청서 등록
-  const addProject = () => {
-    if (!newForm.employeeName.trim() || !newForm.department.trim() || !newForm.text.trim()) {
-      showMessage('필수 정보를 입력해주세요!');
-      return;
-    }
-    
-    const newProject = {
-      id: 'REQ-' + Date.now().toString().slice(-6),
-      ...newForm,
-      title: `${newForm.employeeName} 현수막`,
-      status: 'pending',
-      designs: [],
-      completedImages: [],
-      createdAt: new Date().toLocaleString()
-    };
-    
-    const updatedProjects = [...projects, newProject];
-    setProjects(updatedProjects);
-    saveToFirebase(updatedProjects);
-    setShowForm(false);
-    resetForm();
-    showMessage('🔥 신청서가 Firebase에 저장되었습니다!');
-  };
-
-  // 업체: 시안 업로드
-  const uploadDesign = (projectId) => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.multiple = true;
-    input.accept = 'image/*,.pdf';
-    input.onchange = function(e) {
-      const files = e.target.files;
-      if (!files || files.length === 0) return;
-      
-      const updatedProjects = projects.map(project => {
-        if (project.id === projectId) {
-          const newDesigns = [];
-          for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            const isImage = file.type.startsWith('image/');
-            const isPDF = file.type === 'application/pdf';
-            
-            if (isImage || isPDF) {
-              const newDesign = {
-                id: Date.now() + i,
-                name: file.name,
-                status: 'review',
-                type: isImage ? 'image' : 'pdf',
-                uploadedAt: new Date().toLocaleString()
-              };
-              
-              if (isImage) {
-                const reader = new FileReader();
-                reader.onload = function(event) {
-                  newDesign.preview = event.target.result;
-                };
-                reader.readAsDataURL(file);
-              }
-              
-              newDesigns.push(newDesign);
-            }
-          }
-          
-          return {
-            ...project,
-            designs: [...project.designs, ...newDesigns],
-            status: 'design_uploaded'
-          };
-        }
-        return project;
-      });
-      
-      setProjects(updatedProjects);
-      saveToFirebase(updatedProjects);
-      showMessage(`🔥 ${files.length}개 시안이 Firebase에 저장되었습니다!`);
-    };
-    input.click();
-  };
-
-  // 관리자: 시안 승인
-  const approveDesign = (projectId, designId) => {
-    const updatedProjects = projects.map(project => {
-      if (project.id === projectId) {
-        const updatedDesigns = project.designs.map(design => {
-          if (design.id === designId) {
-            return { ...design, status: 'approved' };
-          }
-          return design;
-        });
-        return {
-          ...project,
-          designs: updatedDesigns,
-          status: 'approved'
-        };
-      }
-      return project;
-    });
-    
-    setProjects(updatedProjects);
-    saveToFirebase(updatedProjects);
-    showMessage('🔥 시안 승인이 Firebase에 저장되었습니다!');
-  };
-
-  // 관리자: 시안 거부
-  const rejectDesign = (projectId, designId) => {
-    const updatedProjects = projects.map(project => {
-      if (project.id === projectId) {
-        const updatedDesigns = project.designs.map(design => {
-          if (design.id === designId) {
-            return { ...design, status: 'rejected' };
-          }
-          return design;
-        });
-        return { ...project, designs: updatedDesigns };
-      }
-      return project;
-    });
-    
-    setProjects(updatedProjects);
-    saveToFirebase(updatedProjects);
-    showMessage('🔥 수정 요청이 Firebase에 저장되었습니다!');
-  };
-
-  // 업체: 제작 시작
-  const startManufacturing = (projectId) => {
-    const updatedProjects = projects.map(project => {
-      if (project.id === projectId) {
-        return { ...project, status: 'manufacturing' };
-      }
-      return project;
-    });
-    
-    setProjects(updatedProjects);
-    saveToFirebase(updatedProjects);
-    showMessage('🔥 제작 시작이 Firebase에 저장되었습니다!');
-  };
-
-  // 업체: 완성품 업로드
-  const uploadCompleted = (projectId) => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.multiple = true;
-    input.accept = 'image/*';
-    input.onchange = function(e) {
-      const files = e.target.files;
-      if (!files || files.length === 0) return;
-      
-      const updatedProjects = projects.map(project => {
-        if (project.id === projectId) {
-          const newImages = [];
-          for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            if (file.type.startsWith('image/')) {
-              const newImage = {
-                id: Date.now() + i,
-                name: file.name,
-                uploadedAt: new Date().toLocaleString()
-              };
-              
-              const reader = new FileReader();
-              reader.onload = function(event) {
-                newImage.preview = event.target.result;
-              };
-              reader.readAsDataURL(file);
-              
-              newImages.push(newImage);
-            }
-          }
-          
-          return {
-            ...project,
-            completedImages: [...project.completedImages, ...newImages],
-            status: 'completed'
-          };
-        }
-        return project;
-      });
-      
-      setProjects(updatedProjects);
-      saveToFirebase(updatedProjects);
-      showMessage(`🔥 ${files.length}개 완성사진이 Firebase에 저장되었습니다!`);
-    };
-    input.click();
-  };
-
-  // 데이터 전체 삭제
-  const clearAllData = () => {
-    if (window.confirm('⚠️ 정말 모든 데이터를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다!')) {
-      const emptyProjects = [];
-      setProjects(emptyProjects);
-      saveToFirebase(emptyProjects);
-      showMessage('🗑️ 모든 데이터가 Firebase에서 삭제되었습니다!');
-    }
-  };
-
-  // 상태별 색상
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'pending': return '#f59e0b';
-      case 'design_uploaded': return '#3b82f6';
-      case 'approved': return '#8b5cf6';
-      case 'manufacturing': return '#f97316';
-      case 'completed': return '#10b981';
-      default: return '#6b7280';
-    }
-  };
-
-  const getStatusText = (status) => {
-    switch (status) {
-      case 'pending': return '시안 대기';
-      case 'design_uploaded': return '시안 검토';
-      case 'approved': return '승인 완료';
-      case 'manufacturing': return '제작중';
-      case 'completed': return '완성';
-      default: return '대기중';
-    }
-  };
-
-  // 로딩 화면
-  if (loading) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontFamily: 'Arial, sans-serif'
-      }}>
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '15px',
-          padding: '50px',
-          textAlign: 'center',
-          boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
-        }}>
-          <div style={{ fontSize: '64px', marginBottom: '20px' }}>🔥</div>
-          <h2 style={{ color: '#10b981', marginBottom: '10px' }}>Firebase v2 연결 중...</h2>
-          <p style={{ color: '#6b7280' }}>실시간 데이터베이스에서 데이터를 불러오고 있습니다.</p>
-        </div>
-      </div>
-    );
-  }
-
-  // 로그인 화면
-  if (!adminLoggedIn && !companyLoggedIn) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '20px',
-        fontFamily: 'Arial, sans-serif'
-      }}>
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '15px',
-          padding: '30px',
-          maxWidth: '350px',
-          width: '100%',
-          boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
-        }}>
-          <div style={{
-            fontSize: '50px',
-            textAlign: 'center',
-            marginBottom: '20px'
-          }}>🏢</div>
-          
-          <h1 style={{
-            fontSize: '28px',
-            fontWeight: 'bold',
-            color: '#10b981',
-            textAlign: 'center',
-            marginBottom: '15px'
-          }}>현수막 관리 시스템 v2</h1>
-          
-          <p style={{
-            fontSize: '14px',
-            color: '#6b7280',
-            textAlign: 'center',
-            marginBottom: '10px'
-          }}>신청서 관리 및 업체 연결 플랫폼</p>
-
-          <div style={{
-            fontSize: '12px',
-            color: '#10b981',
-            textAlign: 'center',
-            marginBottom: '20px',
-            fontWeight: 'bold',
-            backgroundColor: '#ecfdf5',
-            padding: '8px',
-            borderRadius: '8px'
-          }}>
-            🔥 Firebase v2 실시간 동기화<br/>
-            📊 저장된 프로젝트: {projects.length}개
-          </div>
-          
-          <input
-            type="text"
-            placeholder="사용자 ID"
-            value={userId}
-            onChange={(e) => setUserId(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '15px',
-              border: '2px solid #e5e7eb',
-              borderRadius: '10px',
-              fontSize: '16px',
-              marginBottom: '15px',
-              outline: 'none',
-              boxSizing: 'border-box'
-            }}
-          />
-          
-          <input
-            type="password"
-            placeholder="비밀번호"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '15px',
-              border: '2px solid #e5e7eb',
-              borderRadius: '10px',
-              fontSize: '16px',
-              marginBottom: '20px',
-              outline: 'none',
-              boxSizing: 'border-box'
-            }}
-          />
-          
-          <button
-            onClick={doLogin}
-            style={{
-              width: '100%',
-              backgroundColor: '#10b981',
-              color: 'white',
-              padding: '15px',
-              borderRadius: '10px',
-              fontSize: '16px',
-              fontWeight: 'bold',
-              border: 'none',
-              cursor: 'pointer'
-            }}
-          >
-            로그인
-          </button>
-          
-          <div style={{
-            marginTop: '20px',
-            padding: '15px',
-            backgroundColor: '#f9fafb',
-            borderRadius: '10px',
-            fontSize: '12px',
-            color: '#6b7280'
-          }}>
-            <div style={{ marginBottom: '5px' }}>👨‍💼 관리자: admin / admin123</div>
-            <div>🏭 업체: company / company123</div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // 메인 화면 (계속...)
+// 메인 화면 부분을 이 코드로 교체하세요! (return 부분)
   return (
     <div style={{
       minHeight: '100vh',
@@ -648,56 +121,506 @@ export default function App() {
       </header>
 
       <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '20px' }}>
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: '15px',
-          padding: '40px',
-          textAlign: 'center',
-          boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
-        }}>
-          <div style={{ fontSize: '64px', marginBottom: '20px' }}>🎉</div>
-          <h2 style={{ 
-            fontSize: '24px', 
-            fontWeight: 'bold', 
-            color: '#10b981', 
-            marginBottom: '15px' 
-          }}>
-            Firebase v2 연결 성공!
-          </h2>
-          <p style={{ color: '#6b7280', marginBottom: '20px' }}>
-            현수막 관리 시스템이 Firebase와 성공적으로 연결되었습니다!<br/>
-            이제 모든 데이터가 실시간으로 동기화됩니다.
-          </p>
+        {/* 신청서 폼 */}
+        {showForm && (
           <div style={{
-            backgroundColor: '#ecfdf5',
-            padding: '15px',
-            borderRadius: '10px',
-            color: '#10b981',
-            fontWeight: 'bold',
-            marginBottom: '20px'
+            backgroundColor: 'white',
+            borderRadius: '15px',
+            padding: '30px',
+            marginBottom: '20px',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
           }}>
-            📊 현재 저장된 프로젝트: {projects.length}개<br/>
-            🔥 실시간 Firebase 동기화 활성화
-          </div>
-          {adminLoggedIn && (
-            <button
-              onClick={() => setShowForm(true)}
+            <h3 style={{ fontSize: '20px', fontWeight: 'bold', color: '#10b981', marginBottom: '20px' }}>
+              📝 신청서 작성
+            </h3>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px' }}>
+              <input
+                type="text"
+                placeholder="신청자명 *"
+                value={newForm.employeeName}
+                onChange={(e) => updateForm('employeeName', e.target.value)}
+                style={{
+                  padding: '12px',
+                  border: '2px solid #e5e7eb',
+                  borderRadius: '8px',
+                  fontSize: '14px'
+                }}
+              />
+              
+              <input
+                type="text"
+                placeholder="부서명 *"
+                value={newForm.department}
+                onChange={(e) => updateForm('department', e.target.value)}
+                style={{
+                  padding: '12px',
+                  border: '2px solid #e5e7eb',
+                  borderRadius: '8px',
+                  fontSize: '14px'
+                }}
+              />
+              
+              <input
+                type="text"
+                placeholder="연락처"
+                value={newForm.phoneNumber}
+                onChange={(e) => updateForm('phoneNumber', e.target.value)}
+                style={{
+                  padding: '12px',
+                  border: '2px solid #e5e7eb',
+                  borderRadius: '8px',
+                  fontSize: '14px'
+                }}
+              />
+              
+              <input
+                type="text"
+                placeholder="크기 (예: 3m x 1m)"
+                value={newForm.size}
+                onChange={(e) => updateForm('size', e.target.value)}
+                style={{
+                  padding: '12px',
+                  border: '2px solid #e5e7eb',
+                  borderRadius: '8px',
+                  fontSize: '14px'
+                }}
+              />
+              
+              <input
+                type="date"
+                placeholder="마감일"
+                value={newForm.deadline}
+                onChange={(e) => updateForm('deadline', e.target.value)}
+                style={{
+                  padding: '12px',
+                  border: '2px solid #e5e7eb',
+                  borderRadius: '8px',
+                  fontSize: '14px'
+                }}
+              />
+              
+              <input
+                type="text"
+                placeholder="설치 위치"
+                value={newForm.location}
+                onChange={(e) => updateForm('location', e.target.value)}
+                style={{
+                  padding: '12px',
+                  border: '2px solid #e5e7eb',
+                  borderRadius: '8px',
+                  fontSize: '14px'
+                }}
+              />
+            </div>
+            
+            <textarea
+              placeholder="현수막 내용 *"
+              value={newForm.text}
+              onChange={(e) => updateForm('text', e.target.value)}
               style={{
-                backgroundColor: '#10b981',
-                color: 'white',
-                padding: '15px 30px',
-                borderRadius: '10px',
-                fontSize: '16px',
-                fontWeight: 'bold',
-                border: 'none',
-                cursor: 'pointer',
-                marginRight: '10px'
+                width: '100%',
+                padding: '12px',
+                border: '2px solid #e5e7eb',
+                borderRadius: '8px',
+                fontSize: '14px',
+                marginTop: '15px',
+                minHeight: '100px',
+                resize: 'vertical',
+                boxSizing: 'border-box'
               }}
-            >
-              + 첫 번째 신청서 등록하기
-            </button>
-          )}
-        </div>
+            />
+            
+            <textarea
+              placeholder="비고사항"
+              value={newForm.notes}
+              onChange={(e) => updateForm('notes', e.target.value)}
+              style={{
+                width: '100%',
+                padding: '12px',
+                border: '2px solid #e5e7eb',
+                borderRadius: '8px',
+                fontSize: '14px',
+                marginTop: '15px',
+                minHeight: '80px',
+                resize: 'vertical',
+                boxSizing: 'border-box'
+              }}
+            />
+            
+            <div style={{ marginTop: '15px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#374151' }}>
+                참고시안 업로드:
+              </label>
+              <input
+                type="file"
+                multiple
+                accept="image/*"
+                onChange={handleReferenceUpload}
+                style={{
+                  padding: '8px',
+                  border: '2px solid #e5e7eb',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  width: '100%',
+                  boxSizing: 'border-box'
+                }}
+              />
+              
+              {newForm.referenceImages.length > 0 && (
+                <div style={{ marginTop: '10px', display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                  {newForm.referenceImages.map(img => (
+                    <div key={img.id} style={{ position: 'relative' }}>
+                      <img
+                        src={img.preview}
+                        alt={img.name}
+                        style={{
+                          width: '80px',
+                          height: '80px',
+                          objectFit: 'cover',
+                          borderRadius: '8px',
+                          border: '2px solid #e5e7eb'
+                        }}
+                      />
+                      <button
+                        onClick={() => removeReferenceImage(img.id)}
+                        style={{
+                          position: 'absolute',
+                          top: '-5px',
+                          right: '-5px',
+                          backgroundColor: '#ef4444',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '50%',
+                          width: '20px',
+                          height: '20px',
+                          fontSize: '12px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            <div style={{ marginTop: '20px', display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowForm(false)}
+                style={{
+                  padding: '12px 20px',
+                  backgroundColor: '#6b7280',
+                  color: 'white',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                취소
+              </button>
+              
+              <button
+                onClick={addProject}
+                style={{
+                  padding: '12px 20px',
+                  backgroundColor: '#10b981',
+                  color: 'white',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                🔥 Firebase 저장
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 대시보드 */}
+        {!showForm && viewMode === 'dashboard' && (
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '15px',
+            padding: '30px',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
+          }}>
+            <h3 style={{ fontSize: '20px', fontWeight: 'bold', color: '#10b981', marginBottom: '20px' }}>
+              📋 프로젝트 대시보드
+            </h3>
+            
+            {projects.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px' }}>
+                <div style={{ fontSize: '48px', marginBottom: '15px' }}>📋</div>
+                <p style={{ color: '#6b7280', marginBottom: '20px' }}>아직 등록된 프로젝트가 없습니다.</p>
+                <button
+                  onClick={() => setShowForm(true)}
+                  style={{
+                    backgroundColor: '#10b981',
+                    color: 'white',
+                    padding: '12px 20px',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    border: 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  + 첫 번째 프로젝트 등록
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gap: '15px' }}>
+                {projects.map(project => (
+                  <div key={project.id} style={{
+                    border: '2px solid #e5e7eb',
+                    borderRadius: '10px',
+                    padding: '20px',
+                    backgroundColor: '#fafafa'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <h4 style={{ color: '#374151', fontWeight: 'bold' }}>{project.title}</h4>
+                      <span style={{
+                        backgroundColor: getStatusColor(project.status),
+                        color: 'white',
+                        padding: '4px 8px',
+                        borderRadius: '6px',
+                        fontSize: '12px',
+                        fontWeight: 'bold'
+                      }}>
+                        {getStatusText(project.status)}
+                      </span>
+                    </div>
+                    <p style={{ color: '#6b7280', marginBottom: '10px' }}>
+                      {project.employeeName} | {project.department} | {project.createdAt}
+                    </p>
+                    <p style={{ color: '#374151', marginBottom: '15px' }}>{project.text}</p>
+                    
+                    {/* 관리자 기능 */}
+                    {adminLoggedIn && (
+                      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                        {project.designs.map(design => (
+                          <div key={design.id} style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                            <span style={{ fontSize: '12px', color: '#6b7280' }}>{design.name}</span>
+                            {design.status === 'review' && (
+                              <>
+                                <button
+                                  onClick={() => approveDesign(project.id, design.id)}
+                                  style={{
+                                    backgroundColor: '#10b981',
+                                    color: 'white',
+                                    padding: '4px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '10px',
+                                    border: 'none',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  승인
+                                </button>
+                                <button
+                                  onClick={() => rejectDesign(project.id, design.id)}
+                                  style={{
+                                    backgroundColor: '#ef4444',
+                                    color: 'white',
+                                    padding: '4px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '10px',
+                                    border: 'none',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  거부
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {/* 업체 기능 */}
+                    {companyLoggedIn && (
+                      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                        {project.status === 'pending' && (
+                          <button
+                            onClick={() => uploadDesign(project.id)}
+                            style={{
+                              backgroundColor: '#3b82f6',
+                              color: 'white',
+                              padding: '8px 12px',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              fontWeight: 'bold',
+                              border: 'none',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            📎 시안 업로드
+                          </button>
+                        )}
+                        
+                        {project.status === 'approved' && (
+                          <button
+                            onClick={() => startManufacturing(project.id)}
+                            style={{
+                              backgroundColor: '#f97316',
+                              color: 'white',
+                              padding: '8px 12px',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              fontWeight: 'bold',
+                              border: 'none',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            🔨 제작 시작
+                          </button>
+                        )}
+                        
+                        {project.status === 'manufacturing' && (
+                          <button
+                            onClick={() => uploadCompleted(project.id)}
+                            style={{
+                              backgroundColor: '#10b981',
+                              color: 'white',
+                              padding: '8px 12px',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              fontWeight: 'bold',
+                              border: 'none',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            📸 완성품 업로드
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 완성품 갤러리 */}
+        {!showForm && viewMode === 'gallery' && (
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '15px',
+            padding: '30px',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
+          }}>
+            <h3 style={{ fontSize: '20px', fontWeight: 'bold', color: '#10b981', marginBottom: '20px' }}>
+              🖼️ 완성품 갤러리
+            </h3>
+            
+            {projects.filter(p => p.status === 'completed').length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px' }}>
+                <div style={{ fontSize: '48px', marginBottom: '15px' }}>🖼️</div>
+                <p style={{ color: '#6b7280' }}>아직 완성된 현수막이 없습니다.</p>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
+                {projects.filter(p => p.status === 'completed').map(project => (
+                  <div key={project.id} style={{
+                    border: '2px solid #e5e7eb',
+                    borderRadius: '10px',
+                    overflow: 'hidden',
+                    backgroundColor: '#fafafa'
+                  }}>
+                    <div style={{ padding: '15px' }}>
+                      <h4 style={{ color: '#374151', fontWeight: 'bold', marginBottom: '5px' }}>
+                        {project.title}
+                      </h4>
+                      <p style={{ color: '#6b7280', fontSize: '12px', marginBottom: '10px' }}>
+                        {project.employeeName} | {project.department}
+                      </p>
+                    </div>
+                    
+                    {project.completedImages && project.completedImages.length > 0 && (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '5px', padding: '0 15px 15px' }}>
+                        {project.completedImages.map(img => (
+                          <img
+                            key={img.id}
+                            src={img.preview}
+                            alt={img.name}
+                            style={{
+                              width: '100%',
+                              height: '100px',
+                              objectFit: 'cover',
+                              borderRadius: '8px',
+                              border: '1px solid #e5e7eb'
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 초기 화면 (아무것도 선택하지 않았을 때) */}
+        {!showForm && viewMode === 'dashboard' && projects.length === 0 && (
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: '15px',
+            padding: '40px',
+            textAlign: 'center',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
+          }}>
+            <div style={{ fontSize: '64px', marginBottom: '20px' }}>🎉</div>
+            <h2 style={{ 
+              fontSize: '24px', 
+              fontWeight: 'bold', 
+              color: '#10b981', 
+              marginBottom: '15px' 
+            }}>
+              Firebase v2 연결 성공!
+            </h2>
+            <p style={{ color: '#6b7280', marginBottom: '20px' }}>
+              현수막 관리 시스템이 Firebase와 성공적으로 연결되었습니다!<br/>
+              이제 모든 데이터가 실시간으로 동기화됩니다.
+            </p>
+            <div style={{
+              backgroundColor: '#ecfdf5',
+              padding: '15px',
+              borderRadius: '10px',
+              color: '#10b981',
+              fontWeight: 'bold',
+              marginBottom: '20px'
+            }}>
+              📊 현재 저장된 프로젝트: {projects.length}개<br/>
+              🔥 실시간 Firebase 동기화 활성화
+            </div>
+            {adminLoggedIn && (
+              <button
+                onClick={() => setShowForm(true)}
+                style={{
+                  backgroundColor: '#10b981',
+                  color: 'white',
+                  padding: '15px 30px',
+                  borderRadius: '10px',
+                  fontSize: '16px',
+                  fontWeight: 'bold',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                + 첫 번째 신청서 등록하기
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {notification && (
@@ -719,4 +642,3 @@ export default function App() {
       )}
     </div>
   );
-}
