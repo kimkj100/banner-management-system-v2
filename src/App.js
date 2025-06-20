@@ -1,4 +1,220 @@
-// 메인 화면 부분을 이 코드로 교체하세요! (return 부분)
+import React, { useState, useEffect } from 'react';
+import './App.css';
+
+function App() {
+  // 상태 관리
+  const [projects, setProjects] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [viewMode, setViewMode] = useState('dashboard');
+  const [adminLoggedIn, setAdminLoggedIn] = useState(true); // 임시로 true
+  const [companyLoggedIn, setCompanyLoggedIn] = useState(false);
+  const [notification, setNotification] = useState('');
+  
+  // 신청서 폼 상태
+  const [newForm, setNewForm] = useState({
+    employeeName: '',
+    department: '',
+    phoneNumber: '',
+    size: '',
+    deadline: '',
+    location: '',
+    text: '',
+    notes: '',
+    referenceImages: []
+  });
+
+  // 폼 업데이트 함수
+  const updateForm = (field, value) => {
+    setNewForm(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  // 참고시안 업로드 함수
+  const handleReferenceUpload = (e) => {
+    const files = Array.from(e.target.files);
+    const newImages = files.map(file => ({
+      id: Date.now() + Math.random(),
+      file,
+      name: file.name,
+      preview: URL.createObjectURL(file)
+    }));
+    
+    setNewForm(prev => ({
+      ...prev,
+      referenceImages: [...prev.referenceImages, ...newImages]
+    }));
+  };
+
+  // 참고시안 삭제 함수
+  const removeReferenceImage = (id) => {
+    setNewForm(prev => ({
+      ...prev,
+      referenceImages: prev.referenceImages.filter(img => img.id !== id)
+    }));
+  };
+
+  // 프로젝트 추가 함수
+  const addProject = () => {
+    if (!newForm.employeeName || !newForm.department || !newForm.text) {
+      alert('필수 항목을 입력해주세요.');
+      return;
+    }
+
+    const newProject = {
+      id: Date.now(),
+      title: `${newForm.employeeName} - ${newForm.department}`,
+      ...newForm,
+      status: 'pending',
+      createdAt: new Date().toLocaleDateString(),
+      designs: [],
+      completedImages: []
+    };
+
+    setProjects(prev => [...prev, newProject]);
+    
+    // 폼 초기화
+    setNewForm({
+      employeeName: '',
+      department: '',
+      phoneNumber: '',
+      size: '',
+      deadline: '',
+      location: '',
+      text: '',
+      notes: '',
+      referenceImages: []
+    });
+    
+    setShowForm(false);
+    showNotification('프로젝트가 성공적으로 등록되었습니다!');
+  };
+
+  // 알림 표시 함수
+  const showNotification = (message) => {
+    setNotification(message);
+    setTimeout(() => setNotification(''), 3000);
+  };
+
+  // 상태별 색상
+  const getStatusColor = (status) => {
+    switch(status) {
+      case 'pending': return '#f97316';
+      case 'approved': return '#10b981';
+      case 'manufacturing': return '#3b82f6';
+      case 'completed': return '#8b5cf6';
+      default: return '#6b7280';
+    }
+  };
+
+  // 상태별 텍스트
+  const getStatusText = (status) => {
+    switch(status) {
+      case 'pending': return '대기중';
+      case 'approved': return '승인됨';
+      case 'manufacturing': return '제작중';
+      case 'completed': return '완료됨';
+      default: return '알 수 없음';
+    }
+  };
+
+  // 시안 승인 함수
+  const approveDesign = (projectId, designId) => {
+    setProjects(prev => prev.map(project => 
+      project.id === projectId 
+        ? { ...project, status: 'approved' }
+        : project
+    ));
+    showNotification('시안이 승인되었습니다!');
+  };
+
+  // 시안 거부 함수
+  const rejectDesign = (projectId, designId) => {
+    showNotification('시안이 거부되었습니다.');
+  };
+
+  // 시안 업로드 함수 (업체용)
+  const uploadDesign = (projectId) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => {
+      if (e.target.files[0]) {
+        setProjects(prev => prev.map(project => 
+          project.id === projectId 
+            ? { 
+                ...project, 
+                status: 'review',
+                designs: [...project.designs, {
+                  id: Date.now(),
+                  name: e.target.files[0].name,
+                  status: 'review'
+                }]
+              }
+            : project
+        ));
+        showNotification('시안이 업로드되었습니다!');
+      }
+    };
+    input.click();
+  };
+
+  // 제작 시작 함수
+  const startManufacturing = (projectId) => {
+    setProjects(prev => prev.map(project => 
+      project.id === projectId 
+        ? { ...project, status: 'manufacturing' }
+        : project
+    ));
+    showNotification('제작이 시작되었습니다!');
+  };
+
+  // 완성품 업로드 함수
+  const uploadCompleted = (projectId) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.multiple = true;
+    input.onchange = (e) => {
+      if (e.target.files.length > 0) {
+        const files = Array.from(e.target.files);
+        const images = files.map(file => ({
+          id: Date.now() + Math.random(),
+          name: file.name,
+          preview: URL.createObjectURL(file)
+        }));
+        
+        setProjects(prev => prev.map(project => 
+          project.id === projectId 
+            ? { 
+                ...project, 
+                status: 'completed',
+                completedImages: images
+              }
+            : project
+        ));
+        showNotification('완성품이 업로드되었습니다!');
+      }
+    };
+    input.click();
+  };
+
+  // 전체 데이터 삭제 함수
+  const clearAllData = () => {
+    if (window.confirm('정말로 모든 데이터를 삭제하시겠습니까?')) {
+      setProjects([]);
+      showNotification('모든 데이터가 삭제되었습니다.');
+    }
+  };
+
+  // 로그아웃 함수
+  const doLogout = () => {
+    showNotification('로그아웃되었습니다.');
+    // 실제로는 로그인 페이지로 이동
+  };
+
+  // 메인 화면 부분
   return (
     <div style={{
       minHeight: '100vh',
@@ -371,7 +587,35 @@
                     cursor: 'pointer'
                   }}
                 >
-                  + 첫 번째 프로젝트 등록
+                  + 첫 번째 신청서 등록하기
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {notification && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          padding: '15px 25px',
+          borderRadius: '10px',
+          backgroundColor: '#10b981',
+          color: 'white',
+          fontWeight: 'bold',
+          zIndex: 1000,
+          fontSize: '14px',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+        }}>
+          {notification}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default App;프로젝트 등록
                 </button>
               </div>
             ) : (
@@ -616,29 +860,4 @@
                   cursor: 'pointer'
                 }}
               >
-                + 첫 번째 신청서 등록하기
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      {notification && (
-        <div style={{
-          position: 'fixed',
-          top: '20px',
-          right: '20px',
-          padding: '15px 25px',
-          borderRadius: '10px',
-          backgroundColor: '#10b981',
-          color: 'white',
-          fontWeight: 'bold',
-          zIndex: 1000,
-          fontSize: '14px',
-          boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
-        }}>
-          {notification}
-        </div>
-      )}
-    </div>
-  );
+                + 첫 번째
